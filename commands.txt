@@ -1,0 +1,9 @@
+
+Generate Java stubs and GRPC classes from protobuf:
+protoc --experimental_allow_proto3_optional --plugin=protoc-gen-grpc-java=/usr/bin/protoc-gen-grpc-java-1.56.0-linux-x86_64.exe --grpc-java_out=/home/leohn/Desktop/faks/PDS/pds_klk2/src/main/java --java_out=/home/leohn/Desktop/faks/PDS/pds_klk2/src/main/java --proto_path=./src/main/resources/proto/ store_service.proto
+
+Run server(s):
+cc
+
+Run client:
+java -cp simpleGRPC.jar:.:lib/* com.leon.AppClient localhost:2181
