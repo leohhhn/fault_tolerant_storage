@@ -1,25 +1,31 @@
-import com.leon.LoggingService;
-import com.leon.StorageService;
+package com.leon;
+
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Node implements Watcher {
 
     private final ZooKeeper zookeeper;
-    private final StorageService storageService;
     private final LoggingService loggingService;
     private final String nodeAddress;
     private List<String> followerAddresses;
+    private boolean isLeader = false;
+
+
+    private Map<String, String> storageMap = new HashMap<String, String>();
+
 
     public Node(String zookeeperAddress, String nodeAddress) throws Exception {
         this.nodeAddress = nodeAddress;
         this.zookeeper = new ZooKeeper(zookeeperAddress, 3000, this);
-        this.storageService = new StorageService();
         this.loggingService = new LoggingService();
+
 
         // Initialize the list of follower addresses
         this.followerAddresses = new ArrayList<>();
@@ -41,14 +47,29 @@ public class Node implements Watcher {
     }
 
     public void put(String key, String value) {
-        // Put logic goes here, including updating the HashMap, writing to the log,
-        // and forwarding the put request to followers
+        // assumes values are non-null and correct. in case of already existing key we do an update.
+        this.storageMap.put(key, value);
     }
 
     public void delete(String key) {
-        // Delete logic goes here, including updating the HashMap, writing to the log,
-        // and forwarding the delete request to followers
+        // assumes key:value pair exists and simply removes it from the map
+        this.storageMap.remove(key);
     }
 
-    // Other methods as needed...
+    public String read(String key) {
+        return storageMap.get(key);
+    }
+
+    public void setIsLeader(boolean isLeader) {
+        this.isLeader = isLeader;
+    }
+
+    public boolean getIsLeader() {
+        return this.isLeader;
+    }
+
+    public boolean keyExists(String key){
+        return this.storageMap.containsKey(key);
+    }
+
 }
