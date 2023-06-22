@@ -24,7 +24,4 @@ public class FollowerGRPCChannel {
     public StorageServiceGrpc.StorageServiceBlockingStub getBlockingStub() {
         return blockingStub;
     }
-
-
-
 }

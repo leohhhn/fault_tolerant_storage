@@ -1,14 +1,17 @@
 package com.leon;
 
+import com.google.api.Logging;
 import com.leon.gRPC.*;
 import io.grpc.stub.StreamObserver;
 
 public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
 
-    final Node node;
+    public final Node node;
+    public final LoggingService logger;
 
-    public NodeGRPCServer(Node node) {
+    public NodeGRPCServer(Node node, LoggingService logger) {
         this.node = node;
+        this.logger = logger;
     }
 
     public void command(CommandRequest cr, StreamObserver<CommandResponse> responseObserver) {
@@ -23,13 +26,23 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
 
         if (!node.getIsLeader()) {
             response = buildRejectedNotLeaderStatus(reqID);
-        } else {
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            return;
+
+        }
+
+        try {
             switch (type) {
                 case PUT -> {
                     if (!checkPutValues(key, value)) {
                         response = buildKeyOrValueNotProvidedStatus(reqID);
                         break;
                     }
+
+                    logger.writeLocal(cr);
+                    logger.replicateOnFollowers(cr);
+
                     node.put(key, value);
                     response = buildOKStatus(reqID);
                 }
@@ -42,9 +55,12 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                         break;
                     }
 
+                    logger.writeLocal(cr);
+                    logger.replicateOnFollowers(cr);
+
                     node.delete(key);
-                    // todo implement that OK status returns values provided by client from memory
                     response = buildOKStatus(reqID);
+                    // todo implement that OK status returns values provided by client from memorys
                 }
 
                 case READ -> {
@@ -70,10 +86,13 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                     response = buildUnrecognizedStatus(reqID);
                 }
             }
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
 
-        responseObserver.onNext(response);
-        responseObserver.onCompleted();
     }
 
     private boolean checkPutValues(String key, String value) {

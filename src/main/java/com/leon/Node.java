@@ -1,45 +1,80 @@
 package com.leon;
 
+import io.grpc.Context;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class Node implements Watcher {
-
-    private final ZooKeeper zookeeper;
-    private final LoggingService loggingService;
+public class Node implements Watcher, Runnable {
+    private ZooKeeper zk;
+    private final LoggingService logger;
     private final String nodeAddress;
-    private List<String> followerAddresses;
     private boolean isLeader = false;
+    private Map<String, String> storageMap;
+    protected Integer mutex;
 
+    volatile boolean running = false;
+    private Thread thread = null;
+    protected String rootZNode;
 
-    private Map<String, String> storageMap = new HashMap<String, String>();
+    Map<String, FollowerGRPCChannel> followersChannelMap = new HashMap<String, FollowerGRPCChannel>();
 
+    public Node(String zookeeperAddress, String nodeAddress, String logFilePath) throws Exception {
 
-    public Node(String zookeeperAddress, String nodeAddress) throws Exception {
         this.nodeAddress = nodeAddress;
-        this.zookeeper = new ZooKeeper(zookeeperAddress, 3000, this);
-        this.loggingService = new LoggingService();
+        this.storageMap = new HashMap<String, String>();
+
+        connectToZookeeper(zookeeperAddress);
+        // todo check if logs exist and apply them
+        // find last log index
+        election();
+
+        // if not leader wait for leader info, reply w wrong log index if youre missing logs
 
 
-        // Initialize the list of follower addresses
-        this.followerAddresses = new ArrayList<>();
+        // followers map should be instantiated after election
+        this.logger = new LoggingService(logFilePath, followersChannelMap);
 
-        // Node-specific setup tasks
-        setup();
+        int port = Integer.parseInt(nodeAddress.split(":")[1]);
+
+        Server grpcServer = ServerBuilder
+                .forPort(port)
+                .addService(new NodeGRPCServer(this, logger))
+                .build();
+
+        grpcServer.start();
+
+        try {
+
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+
     }
 
-    private void setup() throws Exception {
-        // Node setup logic goes here. For example, connect to ZooKeeper, create Znode, etc.
-    }
-
-    public void process(WatchedEvent event) {
-        // This method is called when something changes in ZooKeeper
+    private void connectToZookeeper(String address) {
+        if (zk == null) {
+            try {
+                System.out.println("Connecting to ZK:");
+                zk = new ZooKeeper(address, 3000, this);
+                mutex = -1;
+                System.out.println("Finished starting ZK: " + zk);
+            } catch (IOException e) {
+                e.printStackTrace();
+                zk = null;
+            }
+        }
     }
 
     private void election() {
@@ -68,8 +103,49 @@ public class Node implements Watcher {
         return this.isLeader;
     }
 
-    public boolean keyExists(String key){
+    public boolean keyExists(String key) {
         return this.storageMap.containsKey(key);
     }
+
+    synchronized public void process(WatchedEvent event) {
+        synchronized (mutex) {
+            mutex.notify();
+        }
+    }
+
+    public void start() {
+        if (!running) {
+            thread = new Thread(this, "Node");
+            running = true;
+            thread.start();
+        }
+    }
+
+    public void stop() {
+        Thread stopThread = thread;
+        thread = null;
+        running = false;
+        stopThread.interrupt();
+    }
+
+    @Override
+    public void run() {
+        while (running) {
+            synchronized (mutex) {
+                try {
+
+                    // TODO SEE IF YOU ACTUALLY NEED THREADS LOL
+
+                    mutex.wait();
+                    System.out.println("Desila se promena u konfiguraciji sistema");
+                    election();
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
 
 }
