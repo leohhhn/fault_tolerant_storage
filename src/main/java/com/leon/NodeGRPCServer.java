@@ -2,6 +2,7 @@ package com.leon;
 
 import com.google.api.Logging;
 import com.leon.gRPC.*;
+import com.leon.helpers.Role;
 import io.grpc.stub.StreamObserver;
 
 public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
@@ -24,7 +25,7 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
         String value = cr.getValue();
         Integer reqID = cr.getRequestId();
 
-        if (!node.getIsLeader()) {
+        if (node.getNodeRole() != Role.LEADER) {
             response = buildRejectedNotLeaderStatus(reqID);
             responseObserver.onNext(response);
             responseObserver.onCompleted();

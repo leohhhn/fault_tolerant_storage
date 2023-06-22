@@ -1,75 +1,82 @@
 package com.leon;
 
-import io.grpc.Context;
+import com.leon.gRPC.StorageServiceGrpc;
+import com.leon.helpers.Role;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.*;
+import org.apache.zookeeper.data.Stat;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-public class Node implements Watcher, Runnable {
-    private ZooKeeper zk;
-    private final LoggingService logger;
-    private final String nodeAddress;
-    private boolean isLeader = false;
-    private Map<String, String> storageMap;
-    protected Integer mutex;
+public class Node implements Watcher {
+    private ZooKeeper zk = null;
+    private LoggingService logger = null;
+    private String port = "";
+    private Map<String, String> storageMap = null;
 
-    volatile boolean running = false;
-    private Thread thread = null;
-    protected String rootZNode;
+    private Integer zkSyncMutex;
+    private String rootZNode = "/root";
+    private String nodeNamePrefix = "/node";
+    private int lastLogEntry = -1;
+    private String grpcAddress; // ip + port
 
-    Map<String, FollowerGRPCChannel> followersChannelMap = new HashMap<String, FollowerGRPCChannel>();
+    private int nodeID = -1;
+    private volatile Role nodeRole = null;
 
-    public Node(String zookeeperAddress, String nodeAddress, String logFilePath) throws Exception {
+    Map<String, FollowerGRPCChannel> followersChannelMap = null;
+    private String leaderZNodePath = "";
+    private String leaderGRPCAddress = "";
 
-        this.nodeAddress = nodeAddress;
-        this.storageMap = new HashMap<String, String>();
+
+    public Node(String zookeeperAddress, String port, String logFilePath) throws Exception {
+
+        this.port = port;
+        this.storageMap = new HashMap<>();
+        this.logger = new LoggingService(logFilePath, null);
+
+        this.grpcAddress = "localhost" + ":" + port;
+
+        logger.applyLogToState(this, logFilePath);
+
+        lastLogEntry = logger.getLastLogIndex();
 
         connectToZookeeper(zookeeperAddress);
-        // todo check if logs exist and apply them
-        // find last log index
-        election();
-
-        // if not leader wait for leader info, reply w wrong log index if youre missing logs
-
-
-        // followers map should be instantiated after election
-        this.logger = new LoggingService(logFilePath, followersChannelMap);
-
-        int port = Integer.parseInt(nodeAddress.split(":")[1]);
-
-        Server grpcServer = ServerBuilder
-                .forPort(port)
-                .addService(new NodeGRPCServer(this, logger))
-                .build();
-
-        grpcServer.start();
+        joinZoo();
 
         try {
-
-
+            election();
         } catch (Exception e) {
+            System.out.println("Election failed!");
             e.printStackTrace();
         }
 
+        // if not leader wait for leader info, reply w wrong log index if you're missing logs
+        // followers map should be instantiated after election
 
+        if (this.nodeRole == Role.LEADER)
+            logger.setFollowerChannelMap(followersChannelMap);
+
+        Server grpcServer = ServerBuilder.forPort(Integer.parseInt(port)).addService(new NodeGRPCServer(this, logger)).build();
+
+        try {
+            grpcServer.start();
+            this.run(); // start listening
+            grpcServer.awaitTermination();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void connectToZookeeper(String address) {
         if (zk == null) {
             try {
-                System.out.println("Connecting to ZK:");
+                System.out.println("Connecting to ZK...");
                 zk = new ZooKeeper(address, 3000, this);
-                mutex = -1;
-                System.out.println("Finished starting ZK: " + zk);
+                zkSyncMutex = -1;
             } catch (IOException e) {
                 e.printStackTrace();
                 zk = null;
@@ -77,8 +84,125 @@ public class Node implements Watcher, Runnable {
         }
     }
 
-    private void election() {
-        // Leader election logic goes here
+    private void joinZoo() {
+        if (zk != null) {
+            try {
+                System.out.println("Joining system...");
+                Stat s = zk.exists(rootZNode, false);
+                if (s == null) {
+                    zk.create(rootZNode, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                }
+
+                String zNodePath = zk.create(rootZNode + nodeNamePrefix, grpcAddress.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+                // example nodeName: /root/node0000000007
+
+                System.out.println("Successfully joined system!");
+                System.out.println("zNode path: " + zNodePath); // i.e /root/node0000000007
+
+                this.nodeID = extractIDFromNodeName(zNodePath);
+                System.out.println("Node ID: " + this.nodeID);
+
+            } catch (KeeperException e) {
+                e.printStackTrace();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private void election() throws Exception {
+        List<String> list = zk.getChildren(rootZNode, true);
+        int numOfNodes = list.size();
+
+        if (numOfNodes == 0)
+            throw new Exception("0 nodes in system - is Zookeeper up?");
+
+        printNodeList(list);
+
+        // leader is the node with the smallest ID value in the system
+        // ID values only keep rising due ZK's SEQUENTIAL mode
+
+        int minID = Integer.MAX_VALUE;
+        for (int i = 0; i < numOfNodes; i++) {
+            int id = extractIDFromNodeName(list.get(i));
+            if (id < minID) {
+                minID = id;
+                this.leaderZNodePath = rootZNode + '/' + list.get(i);
+            }
+        }
+
+        if (minID == this.nodeID) {
+            System.out.println("I'm the new leader!");
+            setLeader(list);
+        } else {
+            System.out.printf("Leader selected! Leader node ID: " + extractIDFromNodeName(this.leaderZNodePath));
+            byte[] b = zk.getData(this.leaderZNodePath, false, null);
+            this.leaderGRPCAddress = new String(b);
+            setNodeRole(Role.FOLLOWER);
+
+        }
+    }
+
+    private void setLeader(List<String> list) throws InterruptedException, KeeperException {
+        setNodeRole(Role.LEADER);
+        createFollowerChannelMap(list);
+        zk.getChildren(rootZNode, true);
+    }
+
+    private void createFollowerChannelMap(List<String> list) {
+        Map<String, FollowerGRPCChannel> oldMap = followersChannelMap;
+        followersChannelMap = new HashMap<>();
+
+        for (String nodeName : list) {
+            if (extractIDFromNodeName(nodeName) == this.nodeID)
+                continue;
+
+
+            // todo rearch this maybe
+            FollowerGRPCChannel followerChannel = oldMap.get(nodeName);
+
+            try {
+                if (followerChannel == null) {
+                    byte[] b = zk.getData(rootZNode + '/' + nodeName, false, null);
+                    String grpcConnection = new String(b);
+                    String[] tokens = grpcConnection.split(":");
+                    ManagedChannel channel = ManagedChannelBuilder
+                            .forAddress(tokens[0], Integer.parseInt(tokens[1]))
+                            .usePlaintext()
+                            .build();
+
+                    StorageServiceGrpc.StorageServiceBlockingStub blockingStub = StorageServiceGrpc.newBlockingStub(channel);
+                    followerChannel = new FollowerGRPCChannel(nodeName, grpcConnection, blockingStub);
+                } else {
+                    oldMap.remove(nodeName);
+                }
+                followersChannelMap.put(nodeName, followerChannel);
+            } catch (InterruptedException | KeeperException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    public void run() {
+        while (true) {
+            // main node loop
+            synchronized (zkSyncMutex) {
+                try {
+                    zkSyncMutex.wait();
+                    System.out.println("System config changed! Re-electing.");
+                    // rerun election
+                    election();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    synchronized public void process(WatchedEvent event) {
+        synchronized (zkSyncMutex) {
+            zkSyncMutex.notify();
+        }
     }
 
     public void put(String key, String value) {
@@ -95,57 +219,31 @@ public class Node implements Watcher, Runnable {
         return storageMap.get(key);
     }
 
-    public void setIsLeader(boolean isLeader) {
-        this.isLeader = isLeader;
-    }
-
-    public boolean getIsLeader() {
-        return this.isLeader;
+    public void setLastLogEntry(int n) {
+        this.lastLogEntry = n;
     }
 
     public boolean keyExists(String key) {
         return this.storageMap.containsKey(key);
     }
 
-    synchronized public void process(WatchedEvent event) {
-        synchronized (mutex) {
-            mutex.notify();
-        }
+    public int extractIDFromNodeName(String nodename) {
+        String id = nodename.replaceAll("[^0-9]", "");
+        return Integer.parseInt(id);
     }
 
-    public void start() {
-        if (!running) {
-            thread = new Thread(this, "Node");
-            running = true;
-            thread.start();
-        }
+    private void printNodeList(List<String> list) {
+        System.out.println("There are a total of " + list.size() + " nodes in the system currently.");
+        System.out.println("Their IDs are:");
+        for (String s : list) System.out.print(extractIDFromNodeName(s) + " ");
+        System.out.println();
     }
 
-    public void stop() {
-        Thread stopThread = thread;
-        thread = null;
-        running = false;
-        stopThread.interrupt();
+    public Role getNodeRole() {
+        return nodeRole;
     }
 
-    @Override
-    public void run() {
-        while (running) {
-            synchronized (mutex) {
-                try {
-
-                    // TODO SEE IF YOU ACTUALLY NEED THREADS LOL
-
-                    mutex.wait();
-                    System.out.println("Desila se promena u konfiguraciji sistema");
-                    election();
-                } catch (InterruptedException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
-                }
-            }
-        }
+    public void setNodeRole(Role nodeRole) {
+        this.nodeRole = nodeRole;
     }
-
-
 }
