@@ -1,6 +1,6 @@
 
 Generate Java stubs and GRPC classes from protobuf:
-protoc --experimental_allow_proto3_optional --plugin=protoc-gen-grpc-java=/usr/bin/protoc-gen-grpc-java-1.56.0-linux-x86_64.exe --grpc-java_out=/home/leohn/Desktop/faks/PDS/PS/src/main/java --java_out=/home/leohn/Desktop/faks/PDS/PDS_REAL/src/main/java --proto_path=./src/main/resources/proto/ store.proto
+protoc --experimental_allow_proto3_optional --plugin=protoc-gen-grpc-java=/usr/bin/protoc-gen-grpc-java-1.56.0-linux-x86_64.exe --grpc-java_out=/home/leohn/Desktop/faks/PDS/PDS_REAL/src/main/java --java_out=/home/leohn/Desktop/faks/PDS/PDS_REAL/src/main/java --proto_path=./src/main/resources/proto/ storage.proto
 
 Run server(s):
 

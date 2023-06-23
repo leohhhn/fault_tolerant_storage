@@ -24,9 +24,10 @@ message CommandRequest {
 
 enum RequestStatus {
   STATUS_OK = 0;
-  UPDATE_REJECTED_NOT_LEADER = 1;
+  REJECTED_NOT_LEADER = 1;
   KEY_NOT_FOUND = 2;
   KEY_OR_VALUE_NOT_PROVIDED = 3;
+  NOT_SYNCED = 4;
 }
 
 message CommandResponse {

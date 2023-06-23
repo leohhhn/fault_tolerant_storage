@@ -4,18 +4,26 @@ public class Main {
     public static void main(String[] args) {
 
 
-        if (args.length != 3) {
-            System.out.println("Usage: java -cp <path_to_JAR> <zookeeper_address:zookeeper_port> <node_port> <log_file_name>");
-            System.exit(1);
+        // unsafe args, todo add security
+        String zookeeperAddress;
+        String port = null;
+        String logFilePath = null;
+        zookeeperAddress = args[0];
+
+        if (args.length == 3) {
+            port = args[1];
+            logFilePath = args[2];
         }
 
-        // todo add checks for args
-        String zookeeperAddress = args[0];
-        String port = args[1];
-        String logFilePath = args[2];
+        Node node;
+        User u;
 
         try {
-            Node node = new Node(zookeeperAddress, port, logFilePath);
+
+            if (args.length == 3)
+                node = new Node(zookeeperAddress, port, logFilePath);
+            else
+                u = new User(zookeeperAddress);
         } catch (Exception e) {
             System.out.println("System crashed at boot! Stack trace:");
             e.printStackTrace();

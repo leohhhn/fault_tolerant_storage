@@ -4,6 +4,11 @@ import com.leon.gRPC.CommandRequest;
 import com.leon.gRPC.CommandType;
 
 import java.io.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Date;
 import java.util.Map;
 
 public class LoggingService {
@@ -25,12 +30,16 @@ public class LoggingService {
     }
 
     public void writeLocal(CommandRequest cr) {
+
         // writes to local log file
         try {
             String logEntry = createLogString(cr);
             BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true));
+
+            System.out.println(formatLogEntryToDate(logEntry));
             writer.write(logEntry);
             writer.newLine();  // Line separator
+
             // todo maybe flush?
             writer.close();
         } catch (IOException e) {
@@ -51,12 +60,12 @@ public class LoggingService {
         StringBuilder sb = new StringBuilder();
 
         // Append the request ID
-        sb.append("Log #").append(String.valueOf(lastLogIndex)).append(": ");
+        sb.append("Log #").append(lastLogIndex).append(": ");
 
-        CommandType type = CommandType.forNumber(request.getOpTypeValue());
+        CommandType type = request.getOpType();
 
         // Append the command type
-        sb.append(type.toString()).append(":");
+        sb.append(type).append(":");
         // Append the key
         sb.append(request.getKey()).append(":");
         // Append the value
@@ -72,8 +81,6 @@ public class LoggingService {
 
     public void applyLogToState(Node node, String logFileName) {
         // deserialize log from local log file
-
-
         try {
             BufferedReader reader = new BufferedReader(new FileReader(logFileName));
             String line;
@@ -107,6 +114,17 @@ public class LoggingService {
 
     public int getLastLogIndex() {
         return lastLogIndex;
+    }
+
+    public String formatLogEntryToDate(String logEntry) {
+        String[] parts = logEntry.split(":");
+        long timestamp = Long.parseLong(parts[4]);
+
+        LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneId.systemDefault());
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(" HH:mm dd.MM.yyyy");
+        String formattedTime = dateTime.format(formatter);
+
+        return String.join(":", parts[0], parts[1], parts[2], parts[3], formattedTime);
     }
 
 }

@@ -114,6 +114,8 @@ public class Node implements Watcher {
         List<String> list = zk.getChildren(rootZNode, true);
         int numOfNodes = list.size();
 
+        System.out.println("========== ELECTION ===========");
+
         if (numOfNodes == 0)
             throw new Exception("0 nodes in system - is Zookeeper up?");
 
@@ -132,15 +134,17 @@ public class Node implements Watcher {
         }
 
         if (minID == this.nodeID) {
-            System.out.println("I'm the new leader!");
+            System.out.println("New leader ID: " + this.nodeID);
             setLeader(list);
         } else {
-            System.out.printf("Leader selected! Leader node ID: " + extractIDFromNodeName(this.leaderZNodePath));
+            System.out.println("Leader selected! Leader node ID: " + extractIDFromNodeName(this.leaderZNodePath));
             byte[] b = zk.getData(this.leaderZNodePath, false, null);
             this.leaderGRPCAddress = new String(b);
             setNodeRole(Role.FOLLOWER);
-
         }
+
+        System.out.println("======== ELECTION OVER ========");
+
     }
 
     private void setLeader(List<String> list) throws InterruptedException, KeeperException {
@@ -156,7 +160,6 @@ public class Node implements Watcher {
         for (String nodeName : list) {
             if (extractIDFromNodeName(nodeName) == this.nodeID)
                 continue;
-
 
             // todo rearch this maybe
             FollowerGRPCChannel followerChannel = oldMap.get(nodeName);
@@ -233,10 +236,14 @@ public class Node implements Watcher {
     }
 
     private void printNodeList(List<String> list) {
-        System.out.println("There are a total of " + list.size() + " nodes in the system currently.");
-        System.out.println("Their IDs are:");
-        for (String s : list) System.out.print(extractIDFromNodeName(s) + " ");
-        System.out.println();
+        if (list.size() == 1) {
+            System.out.println("There is " + list.size() + " node in the system currently.");
+        } else {
+            System.out.println("There are a total of " + list.size() + " nodes in the system currently.");
+            System.out.println("IDs of nodes in the system:");
+            for (String s : list) System.out.print(extractIDFromNodeName(s) + " ");
+            System.out.println();
+        }
     }
 
     public Role getNodeRole() {
@@ -245,5 +252,13 @@ public class Node implements Watcher {
 
     public void setNodeRole(Role nodeRole) {
         this.nodeRole = nodeRole;
+    }
+
+    public String getLeaderGRPCAddress() {
+        return leaderGRPCAddress;
+    }
+
+    public void setLeaderGRPCAddress(String leaderGRPCAddress) {
+        this.leaderGRPCAddress = leaderGRPCAddress;
     }
 }

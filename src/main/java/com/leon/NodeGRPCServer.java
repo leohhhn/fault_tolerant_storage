@@ -25,13 +25,13 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
         String value = cr.getValue();
         Integer reqID = cr.getRequestId();
 
-        if (node.getNodeRole() != Role.LEADER) {
+        if (type != CommandType.READ && node.getNodeRole() != Role.LEADER) {
             response = buildRejectedNotLeaderStatus(reqID);
             responseObserver.onNext(response);
             responseObserver.onCompleted();
             return;
-
         }
+
 
         try {
             switch (type) {
@@ -67,6 +67,12 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                 case READ -> {
                     // READ request ignores value field from user.
                     // todo make this more strict, for security reasons
+
+                    if (node.getNodeRole() != Role.LEADER && !isSyncedWithLeader()) {
+                        response = buildNotSynced(reqID);
+                        break;
+                    }
+
                     if (key.isBlank()) {
                         response = buildKeyOrValueNotProvidedStatus(reqID);
                         break;
@@ -101,6 +107,12 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
         return !key.isBlank() && !value.isBlank();
     }
 
+    private boolean isSyncedWithLeader() {
+        // ask leader for last log
+        // check your log
+        // log indexes match => synced
+        return false;
+    }
 
     private CommandResponse buildOKStatus(Integer reqID) {
         return CommandResponse.newBuilder().
@@ -110,16 +122,26 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
     }
 
     private CommandResponse buildRejectedNotLeaderStatus(Integer reqID) {
-        return CommandResponse.newBuilder().
-                setRequestId(reqID).
-                setStatus(RequestStatus.UPDATE_REJECTED_NOT_LEADER).
-                build();
+        String leaderGRPCAddress = node.getLeaderGRPCAddress(); // might be empty
+        return CommandResponse.newBuilder()
+                .setRequestId(reqID)
+                .setStatus(RequestStatus.REJECTED_NOT_LEADER)
+                .setKey("Current leader GRPC Address:")
+                .setValue(leaderGRPCAddress)
+                .build();
     }
 
     private CommandResponse buildKeyNotFoundStatus(Integer reqID) {
         return CommandResponse.newBuilder().
                 setRequestId(reqID).
                 setStatus(RequestStatus.KEY_NOT_FOUND).
+                build();
+    }
+
+    private CommandResponse buildNotSynced(Integer reqID) {
+        return CommandResponse.newBuilder().
+                setRequestId(reqID).
+                setStatus(RequestStatus.NOT_SYNCED).
                 build();
     }
 
