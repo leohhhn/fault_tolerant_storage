@@ -34,9 +34,9 @@ public class LoggingService {
         // writes to local log file
         try {
             String logEntry = createLogString(cr);
-            BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true));
 
-            System.out.println(formatLogEntryToDate(logEntry));
+            System.out.println(logEntry);
+            BufferedWriter writer = new BufferedWriter(new FileWriter(logFilePath, true));
             writer.write(logEntry);
             writer.newLine();  // Line separator
 
@@ -49,9 +49,9 @@ public class LoggingService {
         lastLogIndex++;
     }
 
-
     public void replicateOnFollowers(CommandRequest cr) {
         // replicates on followers
+
 
     }
 
@@ -70,7 +70,11 @@ public class LoggingService {
         sb.append(request.getKey()).append(":");
         // Append the value
         sb.append(request.getValue());
-        sb.append(":").append(System.currentTimeMillis() / 1000L);
+
+        if (type == CommandType.DELETE)
+            sb.append(System.currentTimeMillis() / 1000L);
+        else
+            sb.append(":").append(System.currentTimeMillis() / 1000L);
 
         return sb.toString();
     }
@@ -116,15 +120,5 @@ public class LoggingService {
         return lastLogIndex;
     }
 
-    public String formatLogEntryToDate(String logEntry) {
-        String[] parts = logEntry.split(":");
-        long timestamp = Long.parseLong(parts[4]);
-
-        LocalDateTime dateTime = LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneId.systemDefault());
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(" HH:mm dd.MM.yyyy");
-        String formattedTime = dateTime.format(formatter);
-
-        return String.join(":", parts[0], parts[1], parts[2], parts[3], formattedTime);
-    }
 
 }

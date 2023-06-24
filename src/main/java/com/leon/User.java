@@ -11,10 +11,7 @@ import org.apache.zookeeper.ZooKeeper;
 
 import java.io.IOException;
 import java.sql.SQLOutput;
-import java.util.Collections;
-import java.util.List;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
 
 import static java.lang.Math.abs;
 
@@ -33,7 +30,8 @@ public class User implements Watcher {
     public User(String zookeeperHosts) {
         connectToZookeeper(zookeeperHosts);
         findLeaderNode();
-        sendRequests();
+       // sendRequests();
+        interactWithUser();
     }
 
     private void connectToZookeeper(String address) {
@@ -66,6 +64,62 @@ public class User implements Watcher {
             e.printStackTrace();
         }
     }
+
+    public void interactWithUser() {
+        Scanner scanner = new Scanner(System.in);
+
+        while (true) {
+            System.out.println("============================");
+            System.out.println("Enter your command (PUT/READ/DELETE), key and value (if needed):");
+            String command = scanner.nextLine();
+
+            String[] parts = command.split(" ");
+            if (parts.length == 1) {
+                System.out.println("Invalid command format. Should be: PUT KEY VALUE");
+                continue;
+            }
+
+            if (parts[0].equalsIgnoreCase("PUT") && parts.length != 3) {
+                System.out.println("Invalid command format. Should be: PUT KEY VALUE");
+                continue;
+            }
+
+            if ((parts[0].equalsIgnoreCase("READ") || parts[0].equalsIgnoreCase("DELETE")) && parts.length != 2) {
+                System.out.println("Invalid command format. Should be: " + parts[0].toUpperCase() + " KEY");
+                continue;
+            }
+
+            CommandRequest.Builder requestBuilder = CommandRequest.newBuilder()
+                    .setRequestId(r.nextInt())
+                    .setKey(parts[1]);
+
+            if (parts[0].equalsIgnoreCase("PUT")) {
+                requestBuilder.setValue(parts[2]);
+            }
+
+            if (parts[0].equalsIgnoreCase("PUT")) {
+                requestBuilder.setOpType(CommandType.PUT);
+            } else if (parts[0].equalsIgnoreCase("DELETE")) {
+                requestBuilder.setOpType(CommandType.DELETE);
+            } else if (parts[0].equalsIgnoreCase("READ")) {
+                requestBuilder.setOpType(CommandType.READ);
+            } else {
+                System.out.println("Invalid command type. Only PUT, READ or DELETE are allowed.");
+                continue;
+            }
+
+            CommandRequest request = requestBuilder.build();
+            CommandResponse response;
+
+            printRequest(request);
+            synchronized (this) {
+                response = blockingStub.command(request);
+            }
+            printResponse(response);
+        }
+    }
+
+
 
     private void sendRequests() {
         CommandType type;
@@ -102,21 +156,11 @@ public class User implements Watcher {
                 .setValue(value)
                 .build();
 
-        System.out.println("========= REQUEST =========");
-        System.out.println("Type: " + type);
-        System.out.println("Request ID: " + reqID);
-        System.out.println("Key: " + key);
-        System.out.println("Value: " + value);
-
+        printRequest(request);
         synchronized (this) {
             response = blockingStub.command(request);
         }
-        System.out.println("========= RESPONSE =========");
-        System.out.println("Request ID: " + response.getRequestId());
-        System.out.println("Status: " + response.getStatus());
-        System.out.println("Key: " + response.getKey());
-        System.out.println("Value: " + response.getValue());
-
+        printResponse(response);
     }
 
     synchronized public void process(WatchedEvent event) {
@@ -124,7 +168,6 @@ public class User implements Watcher {
             zkSyncMutex.notify();
         }
     }
-
 
     public StorageServiceGrpc.StorageServiceBlockingStub getBlockingStub(String address) {
         String ip = address.split(":")[0];
@@ -135,5 +178,21 @@ public class User implements Watcher {
                 .build();
 
         return StorageServiceGrpc.newBlockingStub(leaderChannel);
+    }
+
+    private void printRequest(CommandRequest request) {
+        System.out.println("========= REQUEST =========");
+        System.out.println("Type: " + request.getOpType());
+        System.out.println("Request ID: " + request.getRequestId());
+        System.out.println("Key: " + request.getKey());
+        System.out.println("Value: " + request.getValue());
+    }
+
+    private void printResponse(CommandResponse response) {
+        System.out.println("========= RESPONSE =========");
+        System.out.println("Request ID: " + response.getRequestId());
+        System.out.println("Status: " + response.getStatus());
+        System.out.println("Key: " + response.getKey());
+        System.out.println("Value: " + response.getValue());
     }
 }
