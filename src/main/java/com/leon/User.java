@@ -30,7 +30,7 @@ public class User implements Watcher {
     public User(String zookeeperHosts) {
         connectToZookeeper(zookeeperHosts);
         findLeaderNode();
-       // sendRequests();
+        // sendRequests();
         interactWithUser();
     }
 
@@ -49,7 +49,6 @@ public class User implements Watcher {
 
     private void findLeaderNode() {
         try {
-            // Assuming the root node is / and children nodes represent servers
             List<String> children = zk.getChildren(rootZNode, false);
 
             Collections.sort(children);
@@ -118,7 +117,6 @@ public class User implements Watcher {
             printResponse(response);
         }
     }
-
 
 
     private void sendRequests() {

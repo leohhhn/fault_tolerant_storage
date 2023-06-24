@@ -5,7 +5,7 @@ option java_package = "com.leon.gRPC";
 
 service StorageService {
   rpc Command(CommandRequest) returns (CommandResponse) {}
-  rpc AppendLog(LogEntry) returns (LogResponse) {}
+  rpc AppendLog(Log) returns (LogResponse) {}
   rpc GetLeaderInfo(LeaderRequest) returns (LeaderInfo){}
 }
 
@@ -37,21 +37,21 @@ message CommandResponse {
   string value = 4;
 }
 
-message LogEntry {
-  uint64 entryAtIndex = 1;
-  bytes logEntryData = 2;
+message Log {
+  int32 logIndex = 1; // # of log
+  string log = 2; // the log itself
 }
 
 enum LogStatus {
   LOG_OK = 0;
   IO_ERROR = 1;
-  LOG_HASNT_LAST_ENTRY = 2;
+  LOG_MISMATCH = 2;
 }
 
 message LogResponse {
   LogStatus status = 1;
-  uint64 entryAtIndex = 2;
-  optional uint64 lastEntryIndex = 3;
+  int32 entryAtIndex = 2;
+  int32 lastEntryIndex = 3;
 }
 
 message LeaderRequest {}

@@ -4,6 +4,7 @@ import com.google.api.Logging;
 import com.leon.gRPC.*;
 import com.leon.helpers.Role;
 import io.grpc.stub.StreamObserver;
+import org.apache.zookeeper.server.admin.Command;
 
 public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
 
@@ -31,7 +32,6 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
             responseObserver.onCompleted();
             return;
         }
-
 
         try {
             switch (type) {
@@ -102,6 +102,35 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
 
     }
 
+    public void appendLog(Log l, StreamObserver<LogResponse> responseObserver) {
+
+        // get log
+        // check if local last log index+1 == what is being sent
+        // apply log locally
+
+        LogResponse response;
+        String log = l.getLog();
+        int logIndex = l.getLogIndex();
+
+        if (logIndex != logger.getLastLogIndex() + 1) {
+            response = buildLogMismatch();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            System.out.println("LOG MISMATCH: WAITING FOR LOGS FROM #" + logger.getLastLogIndex());
+            return;
+        }
+
+
+        // deserialize log
+        // apply log to state
+
+        responseObserver.onNext(response);
+        responseObserver.onCompleted();
+
+
+    }
+
+
     private boolean checkPutValues(String key, String value) {
         // both key and value must not be "". return true if values are correct
         return !key.isBlank() && !value.isBlank();
@@ -158,6 +187,13 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                 setStatus(RequestStatus.UNRECOGNIZED).
                 build();
     }
+
+    private LogResponse buildLogMismatch() {
+        return LogResponse.newBuilder().
+                setStatus(LogStatus.LOG_MISMATCH).
+                build();
+    }
+
 }
 
 

@@ -161,7 +161,6 @@ public class Node implements Watcher {
             if (extractIDFromNodeName(nodeName) == this.nodeID)
                 continue;
 
-            // todo rearch this maybe
             FollowerGRPCChannel followerChannel = oldMap.get(nodeName);
 
             try {
@@ -176,6 +175,7 @@ public class Node implements Watcher {
 
                     StorageServiceGrpc.StorageServiceBlockingStub blockingStub = StorageServiceGrpc.newBlockingStub(channel);
                     followerChannel = new FollowerGRPCChannel(nodeName, grpcConnection, blockingStub);
+                    System.out.println(followerChannel);
                 } else {
                     oldMap.remove(nodeName);
                 }

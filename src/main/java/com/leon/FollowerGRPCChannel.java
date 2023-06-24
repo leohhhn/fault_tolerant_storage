@@ -24,4 +24,13 @@ public class FollowerGRPCChannel {
     public StorageServiceGrpc.StorageServiceBlockingStub getBlockingStub() {
         return blockingStub;
     }
+
+
+    @Override
+    public String toString() {
+        return "FollowerGRPCChannel{" +
+                "zkNode='" + zkNode + '\'' +
+                ", connectionString='" + connectionString + '\'' +
+                '}';
+    }
 }

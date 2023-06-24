@@ -30,8 +30,6 @@ public class LoggingService {
     }
 
     public void writeLocal(CommandRequest cr) {
-
-        // writes to local log file
         try {
             String logEntry = createLogString(cr);
 
@@ -119,6 +117,8 @@ public class LoggingService {
     public int getLastLogIndex() {
         return lastLogIndex;
     }
+
+
 
 
 }
