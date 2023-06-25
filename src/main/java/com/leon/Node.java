@@ -21,7 +21,6 @@ public class Node implements Watcher {
     private Integer zkSyncMutex;
     private String rootZNode = "/root";
     private String nodeNamePrefix = "/node";
-    private int lastLogEntry = -1;
     private String grpcAddress; // ip + port
 
     private int nodeID = -1;
@@ -30,19 +29,21 @@ public class Node implements Watcher {
     Map<String, FollowerGRPCChannel> followersChannelMap = null;
     private String leaderZNodePath = "";
     private String leaderGRPCAddress = "";
+    private boolean busy = true;
+
+    private SnapshotService snapshotService;
 
 
-    public Node(String zookeeperAddress, String port, String logFilePath) throws Exception {
+    public Node(String zookeeperAddress, String port, String snapshotFilePath, String logFilePath) throws Exception {
 
         this.port = port;
         this.storageMap = new HashMap<>();
-        this.logger = new LoggingService(logFilePath, null);
+        this.snapshotService= new SnapshotService(snapshotFilePath, this);
+        this.logger = new LoggingService(logFilePath, null, snapshotService);
 
         this.grpcAddress = "localhost" + ":" + port;
 
-        logger.applyLogToState(this, logFilePath);
-
-        lastLogEntry = logger.getLastLogIndex();
+        logger.restoreState(this, logFilePath);
 
         connectToZookeeper(zookeeperAddress);
         joinZoo();
@@ -57,10 +58,10 @@ public class Node implements Watcher {
         // if not leader wait for leader info, reply w wrong log index if you're missing logs
         // followers map should be instantiated after election
 
-        if (this.nodeRole == Role.LEADER)
+        if (this.nodeRole == Role.LEADER) {
             logger.setFollowerChannelMap(followersChannelMap);
-
-        Server grpcServer = ServerBuilder.forPort(Integer.parseInt(port)).addService(new NodeGRPCServer(this, logger)).build();
+        }
+        Server grpcServer = ServerBuilder.forPort(Integer.parseInt(port)).addService(new NodeGRPCServer(this, logger, snapshotService)).build();
 
         try {
             grpcServer.start();
@@ -134,7 +135,7 @@ public class Node implements Watcher {
         }
 
         if (minID == this.nodeID) {
-            System.out.println("New leader ID: " + this.nodeID);
+            System.out.println("I'm the new Leader! Node ID: " + this.nodeID);
             setLeader(list);
         } else {
             System.out.println("Leader selected! Leader node ID: " + extractIDFromNodeName(this.leaderZNodePath));
@@ -144,20 +145,24 @@ public class Node implements Watcher {
         }
 
         System.out.println("======== ELECTION OVER ========");
-
     }
 
     private void setLeader(List<String> list) throws InterruptedException, KeeperException {
         setNodeRole(Role.LEADER);
         createFollowerChannelMap(list);
+        logger.setFollowerChannelMap(followersChannelMap);
         zk.getChildren(rootZNode, true);
     }
 
     private void createFollowerChannelMap(List<String> list) {
+        if (followersChannelMap == null)
+            followersChannelMap = new HashMap<>();
+
         Map<String, FollowerGRPCChannel> oldMap = followersChannelMap;
         followersChannelMap = new HashMap<>();
 
         for (String nodeName : list) {
+
             if (extractIDFromNodeName(nodeName) == this.nodeID)
                 continue;
 
@@ -175,7 +180,7 @@ public class Node implements Watcher {
 
                     StorageServiceGrpc.StorageServiceBlockingStub blockingStub = StorageServiceGrpc.newBlockingStub(channel);
                     followerChannel = new FollowerGRPCChannel(nodeName, grpcConnection, blockingStub);
-                    System.out.println(followerChannel);
+
                 } else {
                     oldMap.remove(nodeName);
                 }
@@ -222,9 +227,6 @@ public class Node implements Watcher {
         return storageMap.get(key);
     }
 
-    public void setLastLogEntry(int n) {
-        this.lastLogEntry = n;
-    }
 
     public boolean keyExists(String key) {
         return this.storageMap.containsKey(key);
@@ -260,5 +262,25 @@ public class Node implements Watcher {
 
     public void setLeaderGRPCAddress(String leaderGRPCAddress) {
         this.leaderGRPCAddress = leaderGRPCAddress;
+    }
+
+    public boolean busy() {
+        return busy;
+    }
+
+    public void setBusy() {
+        busy = true;
+    }
+
+    public void setNotBusy() {
+        busy = false;
+    }
+
+    public Map<String, String> getStorageMap() {
+        return storageMap;
+    }
+
+    public void setStorageMap(Map<String, String> storageMap) {
+        this.storageMap = storageMap;
     }
 }

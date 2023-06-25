@@ -30,8 +30,11 @@ public class User implements Watcher {
     public User(String zookeeperHosts) {
         connectToZookeeper(zookeeperHosts);
         findLeaderNode();
-        // sendRequests();
-        interactWithUser();
+        for (int i = 0; i < 5; i++) {
+            sendRequests();
+        }
+
+        //interactWithUser();
     }
 
     private void connectToZookeeper(String address) {

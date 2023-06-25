@@ -11,9 +11,15 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
     public final Node node;
     public final LoggingService logger;
 
-    public NodeGRPCServer(Node node, LoggingService logger) {
+    private final int SNAPSHOT_SCHEDULE_LOGS = 15;
+    private int logsUntilSnapshot = 15;
+
+    private SnapshotService snapshotService;
+
+    public NodeGRPCServer(Node node, LoggingService logger, SnapshotService snapshotService) {
         this.node = node;
         this.logger = logger;
+        this.snapshotService = snapshotService;
     }
 
     public void command(CommandRequest cr, StreamObserver<CommandResponse> responseObserver) {
@@ -41,11 +47,12 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                         break;
                     }
 
-                    logger.writeLocal(cr);
-                    logger.replicateOnFollowers(cr);
+                    String log = logger.writeLocal(cr); // log logic should contain write and increase log index;
+                    logger.replicateOnFollowers(log);
 
                     node.put(key, value);
                     response = buildOKStatus(reqID);
+                    --logsUntilSnapshot;
                 }
                 case DELETE -> {
                     if (key.isBlank()) {
@@ -56,12 +63,13 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                         break;
                     }
 
-                    logger.writeLocal(cr);
-                    logger.replicateOnFollowers(cr);
+                    String log = logger.writeLocal(cr);
+                    logger.replicateOnFollowers(log);
 
                     node.delete(key);
                     response = buildOKStatus(reqID);
-                    // todo implement that OK status returns values provided by client from memorys
+                    --logsUntilSnapshot;
+                    // todo implement that OK status returns values provided by client from memory
                 }
 
                 case READ -> {
@@ -100,34 +108,55 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
             e.printStackTrace();
         }
 
+        if (logsUntilSnapshot == 0) {
+            snapshotService.makeSnapshot(logger.getLastLogIndex()-1);
+            logsUntilSnapshot = SNAPSHOT_SCHEDULE_LOGS;
+        }
     }
 
-    public void appendLog(Log l, StreamObserver<LogResponse> responseObserver) {
-
-        // get log
+    public void appendLog(LogMessage l, StreamObserver<LogResponse> responseObserver) {
+        // get log in as string format defined in logging service
         // check if local last log index+1 == what is being sent
         // apply log locally
+
+        int lastLogIndex = logger.getLastLogIndex();
 
         LogResponse response;
         String log = l.getLog();
         int logIndex = l.getLogIndex();
 
-        if (logIndex != logger.getLastLogIndex() + 1) {
-            response = buildLogMismatch();
+        if (node.busy()) {
+            response = buildFollowerBusy();
             responseObserver.onNext(response);
             responseObserver.onCompleted();
-            System.out.println("LOG MISMATCH: WAITING FOR LOGS FROM #" + logger.getLastLogIndex());
+            System.out.println("Leader tried replicating but I'm busy");
             return;
         }
 
+        if (logIndex != lastLogIndex) {
+            response = buildLogMismatch(lastLogIndex);
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+            System.out.println("LOG MISMATCH: Last local log is #" + lastLogIndex);
+            return;
+        }
 
-        // deserialize log
-        // apply log to state
+        System.out.println(log);
+
+        logger.applyReplicatedLog(node, log);
+        logger.writeLocalFromLog(log);
+
+        response = buildLogOK(logIndex); // returns the index of log that was just written to sender
 
         responseObserver.onNext(response);
         responseObserver.onCompleted();
 
+        --logsUntilSnapshot;
 
+        if (logsUntilSnapshot == 0) {
+            snapshotService.makeSnapshot(logger.getLastLogIndex()-1);
+            logsUntilSnapshot = SNAPSHOT_SCHEDULE_LOGS;
+        }
     }
 
 
@@ -188,10 +217,24 @@ public class NodeGRPCServer extends StorageServiceGrpc.StorageServiceImplBase {
                 build();
     }
 
-    private LogResponse buildLogMismatch() {
-        return LogResponse.newBuilder().
-                setStatus(LogStatus.LOG_MISMATCH).
-                build();
+    private LogResponse buildLogMismatch(int lastEntryIndex) {
+        return LogResponse.newBuilder()
+                .setLastEntryIndex(lastEntryIndex)
+                .setStatus(LogStatus.LOG_MISMATCH)
+                .build();
+    }
+
+    private LogResponse buildFollowerBusy() {
+        return LogResponse.newBuilder()
+                .setStatus(LogStatus.FOLLOWER_BUSY)
+                .build();
+    }
+
+    private LogResponse buildLogOK(int lastEntryIndex) {
+        return LogResponse.newBuilder()
+                .setLastEntryIndex(lastEntryIndex)
+                .setStatus(LogStatus.LOG_OK)
+                .build();
     }
 
 }

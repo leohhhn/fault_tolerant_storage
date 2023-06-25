@@ -25,7 +25,6 @@ public class FollowerGRPCChannel {
         return blockingStub;
     }
 
-
     @Override
     public String toString() {
         return "FollowerGRPCChannel{" +
