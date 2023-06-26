@@ -1,16 +1,13 @@
 package com.leon;
 
 import com.leon.gRPC.*;
-import com.sun.nio.sctp.PeerAddressChangeNotification;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooKeeper;
 
-
 import java.io.IOException;
-import java.sql.SQLOutput;
 import java.util.*;
 
 import static java.lang.Math.abs;
@@ -20,21 +17,21 @@ public class User implements Watcher {
     private String leaderNodePath;
     private String leaderGRPCAddress;
     private String rootZNode = "/root";
-
     private Integer zkSyncMutex;
 
     private ManagedChannel leaderChannel = null;
     private StorageServiceGrpc.StorageServiceBlockingStub blockingStub = null;
+    private boolean ready = false;
     Random r = new Random();
 
     public User(String zookeeperHosts) {
-        connectToZookeeper(zookeeperHosts);
-        findLeaderNode();
-        for (int i = 0; i < 5; i++) {
-            sendRequests();
+        try {
+            connectToZookeeper(zookeeperHosts);
+            findLeaderNode();
+        } catch (Exception e) {
+            System.out.println("Error with leader node!");
+            findLeaderNode();
         }
-
-        //interactWithUser();
     }
 
     private void connectToZookeeper(String address) {
@@ -50,18 +47,34 @@ public class User implements Watcher {
         }
     }
 
-    private void findLeaderNode() {
+    private synchronized void findLeaderNode() {
         try {
+            Thread.sleep(2100);
+
             List<String> children = zk.getChildren(rootZNode, false);
 
+            boolean leaderExists = false;
+            for (String s : children) {
+                if (s.equals("leader")) {
+                    leaderExists = true;
+                    children.remove(s);
+                    break;
+                }
+            }
+
+            if (!leaderExists) {
+                waitForLeaderToJoin();
+            }
+
             Collections.sort(children);
+
             leaderNodePath = children.get(0);
 
             System.out.println("GETTING LEADER ADDRESS:");
             this.leaderGRPCAddress = new String(zk.getData(rootZNode + "/" + leaderNodePath, false, null));
             System.out.println(this.leaderGRPCAddress);
             this.blockingStub = getBlockingStub(this.leaderGRPCAddress);
-
+            interactWithServer();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -71,6 +84,11 @@ public class User implements Watcher {
         Scanner scanner = new Scanner(System.in);
 
         while (true) {
+            if (!ready) {
+                System.out.println("not ready!");
+                continue;
+            }
+
             System.out.println("============================");
             System.out.println("Enter your command (PUT/READ/DELETE), key and value (if needed):");
             String command = scanner.nextLine();
@@ -92,7 +110,7 @@ public class User implements Watcher {
             }
 
             CommandRequest.Builder requestBuilder = CommandRequest.newBuilder()
-                    .setRequestId(r.nextInt())
+                    .setRequestId(abs(r.nextInt()))
                     .setKey(parts[1]);
 
             if (parts[0].equalsIgnoreCase("PUT")) {
@@ -121,8 +139,21 @@ public class User implements Watcher {
         }
     }
 
+    private void interactWithServer() {
+        try {
+            for (int i = 0; i < 50; i++) {
+                sendRequests();
+            }
+            Thread.sleep(2000);
+        } catch (Exception e) {
+            System.out.println("Error with leader node!");
+            e.printStackTrace();
+            findLeaderNode();
+        }
+    }
 
     private void sendRequests() {
+        // sends 4 requests to server
         CommandType type;
 
         type = CommandType.PUT;
@@ -141,7 +172,8 @@ public class User implements Watcher {
         buildAndSendRequest(type, abs(r.nextInt()), key, "");
 
         try {
-            Thread.sleep(100);
+
+            Thread.sleep(500);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
@@ -179,6 +211,22 @@ public class User implements Watcher {
                 .build();
 
         return StorageServiceGrpc.newBlockingStub(leaderChannel);
+    }
+
+    public void waitForLeaderToJoin() throws InterruptedException {
+        while (true) {
+            // main node loop
+            synchronized (zkSyncMutex) {
+                try {
+                    zkSyncMutex.wait();
+                    System.out.println("System config changed! Re-electing.");
+                    // rerun election
+                    findLeaderNode();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
     }
 
     private void printRequest(CommandRequest request) {

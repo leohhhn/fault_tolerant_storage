@@ -38,7 +38,7 @@ public class Node implements Watcher {
 
         this.port = port;
         this.storageMap = new HashMap<>();
-        this.snapshotService= new SnapshotService(snapshotFilePath, this);
+        this.snapshotService = new SnapshotService(snapshotFilePath, this);
         this.logger = new LoggingService(logFilePath, null, snapshotService);
 
         this.grpcAddress = "localhost" + ":" + port;
@@ -113,8 +113,15 @@ public class Node implements Watcher {
 
     private void election() throws Exception {
         List<String> list = zk.getChildren(rootZNode, true);
-        int numOfNodes = list.size();
 
+        for (String s : list) {
+            if (s.equals("leader")) {
+                list.remove(s);
+                break;
+            }
+        }
+
+        int numOfNodes = list.size();
         System.out.println("========== ELECTION ===========");
 
         if (numOfNodes == 0)
@@ -151,7 +158,12 @@ public class Node implements Watcher {
         setNodeRole(Role.LEADER);
         createFollowerChannelMap(list);
         logger.setFollowerChannelMap(followersChannelMap);
+
+        Stat s = zk.exists(rootZNode + "/leader", false);
+        if (s == null)
+            zk.create(rootZNode + "/leader", grpcAddress.getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
         zk.getChildren(rootZNode, true);
+
     }
 
     private void createFollowerChannelMap(List<String> list) {
